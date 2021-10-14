@@ -878,7 +878,7 @@ contract BEP20 is Context, IBEP20, Ownable {
 }
 
 // TomatoCoin.
-contract TomatoCoin is BEP20('FarmersOnly\'s Tomato Coin', 'TOMATO') {
+contract TomatoCoin is BEP20('FarmersOnly\'s Tomato Coin', 'TMT') {
     /// @notice Creates `_amount` token to `_to`. Must only be called by the owner (MasterChef).
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);

@@ -1055,7 +1055,7 @@ contract BEP20 is Context, IBEP20, Ownable {
 
 
 // TomatoCoin with Governance.
-contract TomatoCoin is BEP20('FarmersOnly\'s Tomato Coin', 'TOMATO') {
+contract TomatoCoin is BEP20('FarmersOnly\'s Tomato Coin', 'TMT') {
     /// @notice Creates `_amount` token to `_to`. Must only be called by the owner (MasterChef).
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
@@ -1085,7 +1085,7 @@ interface IReferral {
 // MasterChef is the master of Tomato. He can make Tomato and he is a fair guy.
 //
 // Note that it's ownable and the owner wields tremendous power. The ownership
-// will be transferred to a governance smart contract once TOMATO is sufficiently
+// will be transferred to a governance smart contract once TMT is sufficiently
 // distributed and the community can show to govern itself.
 //
 // Have fun reading it. Hopefully it's bug-free. God bless.
@@ -1100,7 +1100,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         uint256 rewardLockedUp;  // Reward locked up.
         uint256 nextHarvestUntil; // When can the user harvest again.
         //
-        // We do some fancy math here. Basically, any point in time, the amount of TOMATOs
+        // We do some fancy math here. Basically, any point in time, the amount of TMTs
         // entitled to a user but is pending to be distributed is:
         //
         //   pending reward = (user.amount * pool.accTomatoPerShare) - user.rewardDebt
@@ -1115,20 +1115,20 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     // Info of each pool.
     struct PoolInfo {
         IBEP20 lpToken;           // Address of LP token contract.
-        uint256 allocPoint;       // How many allocation points assigned to this pool. TOMATOs to distribute per second.
-        uint256 lastRewardTime;  // Last time TOMATOs distribution occurs.
-        uint256 accTomatoPerShare;   // Accumulated TOMATOs per share, times 1e18. See below.
+        uint256 allocPoint;       // How many allocation points assigned to this pool. TMTs to distribute per second.
+        uint256 lastRewardTime;  // Last time TMTs distribution occurs.
+        uint256 accTomatoPerShare;   // Accumulated TMTs per share, times 1e18. See below.
         uint16 depositFeeBP;      // Deposit fee in basis points
         uint256 harvestInterval;
         // uint256 minHarvestInterval;  // Harvest interval in seconds
         // uint256 maxHarvestInterval;  // Harvest interval in seconds
     }
 
-    // The TOMATO TOKEN!
+    // The TMT TOKEN!
     TomatoCoin public tomato;
     // Dev address.
     address public devAddress;
-    // TOMATO tokens created per second.
+    // TMT tokens created per second.
     uint256 public tomatoPerSecond;
     // Bonus muliplier for early tomato makers.
     uint256 public constant BONUS_MULTIPLIER = 1;
@@ -1153,7 +1153,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
-    // The timestamp when TOMATO mining starts.
+    // The timestamp when TMT mining starts.
     uint256 public startTime;
 
     IReferral public referral;
@@ -1252,7 +1252,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         }
     }
 
-    // Update the given pool's TOMATO allocation point and deposit fee. Can only be called by the owner.
+    // Update the given pool's TMT allocation point and deposit fee. Can only be called by the owner.
     function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) public onlyOwner {
         require(_depositFeeBP <= MAX_POOL_FEE, "set: invalid deposit fee basis points");
         // require(_minHarvestInterval <= _maxHarvestInterval, "add: invalid harvest interval");
@@ -1277,7 +1277,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         return _to.sub(_from).mul(BONUS_MULTIPLIER);
     }
 
-    // View function to see pending TOMATOs on frontend.
+    // View function to see pending TMTs on frontend.
     function pendingTomato(uint256 _pid, address _user) external view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
@@ -1332,7 +1332,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         pool.lastRewardTime = block.timestamp;
     }
 
-    // Deposit LP tokens to MasterChef for TOMATO allocation.
+    // Deposit LP tokens to MasterChef for TMT allocation.
     function deposit(uint256 _pid, uint256 _amount, address _referrer) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
@@ -1458,7 +1458,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         user.nextHarvestUntil = 0;
     }
 
-    // Safe tomato transfer function, just in case if rounding error causes pool to not have enough TOMATOs.
+    // Safe tomato transfer function, just in case if rounding error causes pool to not have enough TMTs.
     function safeTomatoTransfer(address _to, uint256 _amount) internal {
         uint256 tomatoBal = tomato.balanceOf(address(this));
         bool transferSuccess = false;
