@@ -749,7 +749,7 @@ abstract contract ReentrancyGuard {
 }
 
 
-contract FarmersOnlyStakingPool is Ownable {
+contract FarmersOnlyStakingPool is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeBEP20 for IBEP20;
 
@@ -761,33 +761,33 @@ contract FarmersOnlyStakingPool is Ownable {
 
     // Info of each pool.
     struct PoolInfo {
-        IBEP20 lpToken;           // Address of LP token contract.
-        uint256 allocPoint;       // How many allocation points assigned to this pool. Rewards to distribute per block.
-        uint256 lastRewardTime;  // Last block number that Rewards distribution occurs.
+        IBEP20 lpToken;                 // Address of LP token contract.
+        uint256 lastRewardTime;         // Last second that Rewards distribution occurs.
         uint256 accRewardTokenPerShare; // Accumulated Rewards per share, times 1e30. See below.
     }
 
     // The stake token
-    IBEP20 public stakeToken;
+    IBEP20 public immutable stakeToken;
     // The reward token
-    IBEP20 public rewardToken;
+    IBEP20 public immutable rewardToken;
 
-    // Reward tokens created per block.
+    // Reward tokens created per second.
     uint256 public rewardPerTime;
 
     // Keep track of number of tokens staked in case the contract earns reflect fees
     uint256 public totalStaked = 0;
 
     // Info of each pool.
-    PoolInfo[] public poolInfo;
+    PoolInfo public poolInfo;
     // Info of each user that stakes LP tokens.
     mapping (address => UserInfo) public userInfo;
-    // Total allocation points. Must be the sum of all allocation points in all pools.
-    uint256 private totalAllocPoint = 0;
-    // The block number when Reward mining starts.
-    uint256 public startTime;
-	// The block number when mining ends.
+    // The second when Reward mining starts.
+    uint256 public immutable startTime;
+    // The second when mining ends.
     uint256 public bonusEndTime;
+
+    // Maximum emission rate for the StakingPool.
+    uint256 public constant MAX_REWARD_PER_TIME = 0.01 ether;
 
     event Deposit(address indexed user, uint256 amount);
     event DepositRewards(uint256 amount);
@@ -795,6 +795,8 @@ contract FarmersOnlyStakingPool is Ownable {
     event EmergencyWithdraw(address indexed user, uint256 amount);
     event EmergencyRewardWithdraw(address indexed user, uint256 amount);
     event SkimStakeTokenFees(address indexed user, uint256 amount);
+    event SetRewardPerTime(uint256 oldRewardPerTime, uint256 newRewardPerTime);
+    event SetBonusEndTime(uint256 oldBonusEndTime, uint256 newBonusEndTime);
 
     constructor(
         IBEP20 _stakeToken,
@@ -803,6 +805,9 @@ contract FarmersOnlyStakingPool is Ownable {
         uint256 _startTime,
         uint256 _bonusEndTime
     ) public {
+        require(_stakeToken != _rewardToken, "constructor: does not support same currency pools");
+        require(_rewardPerTime <= MAX_REWARD_PER_TIME, "constructor: rewardPerTime is larger than MAX_REWARD_PER_TIME");
+
         stakeToken = _stakeToken;
         rewardToken = _rewardToken;
         rewardPerTime = _rewardPerTime;
@@ -810,18 +815,15 @@ contract FarmersOnlyStakingPool is Ownable {
         bonusEndTime = _bonusEndTime;
 
         // staking pool
-        poolInfo.push(PoolInfo({
+        poolInfo = PoolInfo({
             lpToken: _stakeToken,
-            allocPoint: 1000,
-            lastRewardTime: startTime,
+            lastRewardTime: _startTime,
             accRewardTokenPerShare: 0
-        }));
-        
-        totalAllocPoint = 1000;
+        });
 
     }
 
-    // Return reward multiplier over the given _from to _to block.
+    // Return reward multiplier over the given _from to _to second.
     function getMultiplier(uint256 _from, uint256 _to) public view returns (uint256) {
         if (_to <= bonusEndTime) {
             return _to.sub(_from);
@@ -834,20 +836,20 @@ contract FarmersOnlyStakingPool is Ownable {
 
     // View function to see pending Reward on frontend.
     function pendingReward(address _user) external view returns (uint256) {
-        PoolInfo storage pool = poolInfo[0];
+        PoolInfo storage pool = poolInfo;
         UserInfo storage user = userInfo[_user];
         uint256 accRewardTokenPerShare = pool.accRewardTokenPerShare;
         if (block.timestamp > pool.lastRewardTime && totalStaked != 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
-            uint256 tokenReward = multiplier.mul(rewardPerTime).mul(pool.allocPoint).div(totalAllocPoint);
+            uint256 tokenReward = multiplier.mul(rewardPerTime);
             accRewardTokenPerShare = accRewardTokenPerShare.add(tokenReward.mul(1e30).div(totalStaked));
         }
         return user.amount.mul(accRewardTokenPerShare).div(1e30).sub(user.rewardDebt);
     }
 
     // Update reward variables of the given pool to be up-to-date.
-    function updatePool(uint256 _pid) public {
-        PoolInfo storage pool = poolInfo[_pid];
+    function updatePool() public {
+        PoolInfo storage pool = poolInfo;
         if (block.timestamp <= pool.lastRewardTime) {
             return;
         }
@@ -856,45 +858,36 @@ contract FarmersOnlyStakingPool is Ownable {
             return;
         }
         uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
-        uint256 tokenReward = multiplier.mul(rewardPerTime).mul(pool.allocPoint).div(totalAllocPoint);
+        uint256 tokenReward = multiplier.mul(rewardPerTime);
         pool.accRewardTokenPerShare = pool.accRewardTokenPerShare.add(tokenReward.mul(1e30).div(totalStaked));
         pool.lastRewardTime = block.timestamp;
     }
-
-    // Update reward variables for all pools. Be careful of gas spending!
-    function massUpdatePools() public {
-        uint256 length = poolInfo.length;
-        for (uint256 pid = 0; pid < length; ++pid) {
-            updatePool(pid);
-        }
-    }
-
 
     /// Deposit staking token into the contract to earn rewards.
     /// @dev Since this contract needs to be supplied with rewards we are
     ///  sending the balance of the contract if the pending rewards are higher
     /// @param _amount The amount of staking tokens to deposit
-    function deposit(uint256 _amount) public {
-        PoolInfo storage pool = poolInfo[0];
+    function deposit(uint256 _amount) external nonReentrant {
+        PoolInfo storage pool = poolInfo;
         UserInfo storage user = userInfo[msg.sender];
         uint256 finalDepositAmount = 0;
-        updatePool(0);
+        updatePool();
         if (user.amount > 0) {
             uint256 pending = user.amount.mul(pool.accRewardTokenPerShare).div(1e30).sub(user.rewardDebt);
             if(pending > 0) {
                 uint256 currentRewardBalance = rewardBalance();
                 if(currentRewardBalance > 0) {
                     if(pending > currentRewardBalance) {
-                        safeTransferReward(address(msg.sender), currentRewardBalance);
+                        safeTransferReward(msg.sender, currentRewardBalance);
                     } else {
-                        safeTransferReward(address(msg.sender), pending);
+                        safeTransferReward(msg.sender, pending);
                     }
                 }
             }
         }
         if (_amount > 0) {
             uint256 preStakeBalance = totalStakeTokenBalance();
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+            pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
             finalDepositAmount = totalStakeTokenBalance().sub(preStakeBalance);
             user.amount = user.amount.add(finalDepositAmount);
             totalStaked = totalStaked.add(finalDepositAmount);
@@ -906,25 +899,25 @@ contract FarmersOnlyStakingPool is Ownable {
 
     /// Withdraw rewards and/or staked tokens. Pass a 0 amount to withdraw only rewards
     /// @param _amount The amount of staking tokens to withdraw
-    function withdraw(uint256 _amount) public {
-        PoolInfo storage pool = poolInfo[0];
+    function withdraw(uint256 _amount) external nonReentrant {
+        PoolInfo storage pool = poolInfo;
         UserInfo storage user = userInfo[msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
-        updatePool(0);
+        updatePool();
         uint256 pending = user.amount.mul(pool.accRewardTokenPerShare).div(1e30).sub(user.rewardDebt);
         if(pending > 0) {
             uint256 currentRewardBalance = rewardBalance();
             if(currentRewardBalance > 0) {
                 if(pending > currentRewardBalance) {
-                    safeTransferReward(address(msg.sender), currentRewardBalance);
+                    safeTransferReward(msg.sender, currentRewardBalance);
                 } else {
-                    safeTransferReward(address(msg.sender), pending);
+                    safeTransferReward(msg.sender, pending);
                 }
             }
         }
         if(_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
+            pool.lpToken.safeTransfer(msg.sender, _amount);
             totalStaked = totalStaked.sub(_amount);
         }
 
@@ -943,7 +936,7 @@ contract FarmersOnlyStakingPool is Ownable {
     function depositRewards(uint256 _amount) external {
         require(_amount > 0, 'Deposit value must be greater than 0.');
         
-        rewardToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+        rewardToken.safeTransferFrom(msg.sender, address(this), _amount);
         emit DepositRewards(_amount);
     }
 
@@ -955,15 +948,27 @@ contract FarmersOnlyStakingPool is Ownable {
 
     /* Admin Functions */
 
-    /// @param _rewardPerTime The amount of reward tokens to be given per block
+    /// @param _rewardPerTime The amount of reward tokens to be given per second
     function setRewardPerTime(uint256 _rewardPerTime) external onlyOwner {
+        require(_rewardPerTime <= MAX_REWARD_PER_TIME, "setRewardPerTime: rewardPerTime is larger than MAX_REWARD_PER_TIME");
+        updatePool();
+
+        uint256 _oldRewardPerTime = rewardPerTime;
+
         rewardPerTime = _rewardPerTime;
+
+        emit SetRewardPerTime(_oldRewardPerTime, _rewardPerTime);
     }
 
-    /// @param  _bonusEndTime The block when rewards will end
+    /// @param  _bonusEndTime The second when rewards will end
     function setBonusEndTime(uint256 _bonusEndTime) external onlyOwner {
-        require(_bonusEndTime > bonusEndTime, 'new bonus end block must be greater than current');
+        require(_bonusEndTime > bonusEndTime, 'new bonus end time must be greater than current');
+
+        uint256 _oldBonusEndTime = bonusEndTime;
+
         bonusEndTime = _bonusEndTime;
+
+        emit SetBonusEndTime(_oldBonusEndTime, _bonusEndTime);
     }
 
     /// @dev Obtain the stake token fees (if any) earned by reflect token
@@ -988,21 +993,21 @@ contract FarmersOnlyStakingPool is Ownable {
     /* Emergency Functions */
 
     // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw() external {
-        PoolInfo storage pool = poolInfo[0];
+    function emergencyWithdraw() external nonReentrant {
+        PoolInfo storage pool = poolInfo;
         UserInfo storage user = userInfo[msg.sender];
-        pool.lpToken.safeTransfer(address(msg.sender), user.amount);
+        pool.lpToken.safeTransfer(msg.sender, user.amount);
         totalStaked = totalStaked.sub(user.amount);
+        emit EmergencyWithdraw(msg.sender, user.amount);
         user.amount = 0;
         user.rewardDebt = 0;
-        emit EmergencyWithdraw(msg.sender, user.amount);
     }
 
     // Withdraw reward. EMERGENCY ONLY.
     function emergencyRewardWithdraw(uint256 _amount) external onlyOwner {
         require(_amount <= rewardBalance(), 'not enough rewards');
         // Withdraw rewards
-        safeTransferReward(address(msg.sender), _amount);
+        safeTransferReward(msg.sender, _amount);
         emit EmergencyRewardWithdraw(msg.sender, _amount);
     }
 

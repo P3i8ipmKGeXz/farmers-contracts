@@ -1096,24 +1096,20 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
 
     // Info of each pool.
     struct PoolInfo {
-        IBEP20 lpToken;           // Address of LP token contract.
-        uint256 allocPoint;       // How many allocation points assigned to this pool. TMTs to distribute per second.
-        uint256 lastRewardTime;  // Last time TMTs distribution occurs.
-        uint256 accTomatoPerShare;   // Accumulated TMTs per share, times 1e18. See below.
-        uint16 depositFeeBP;      // Deposit fee in basis points
-        uint256 harvestInterval;
-        // uint256 minHarvestInterval;  // Harvest interval in seconds
-        // uint256 maxHarvestInterval;  // Harvest interval in seconds
+        IBEP20 lpToken;             // Address of LP token contract.
+        uint256 allocPoint;         // How many allocation points assigned to this pool. TMTs to distribute per second.
+        uint256 lastRewardTime;     // Last time TMTs distribution occurs.
+        uint256 accTomatoPerShare;  // Accumulated TMTs per share, times 1e18. See below.
+        uint16 depositFeeBP;        // Deposit fee in basis points
+        uint256 harvestInterval;    // Harvest interval in seconds
     }
 
     // The TMT TOKEN!
-    TomatoCoin public tomato;
+    TomatoCoin public immutable tomato;
     // Dev address.
     address public devAddress;
     // TMT tokens created per second.
     uint256 public tomatoPerSecond;
-    // Bonus muliplier for early tomato makers.
-    uint256 public constant BONUS_MULTIPLIER = 1;
     // Deposit Fee address
     address public feeAddress;
 
@@ -1139,9 +1135,9 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     uint256 public startTime;
     
     // Maximum tomatoPerSecond
-    uint256 public MAX_EMISSION_RATE = 0.007 ether;
+    uint256 public constant MAX_EMISSION_RATE = 0.007 ether;
     // Initial tomatoPerSecond
-    uint256 public EMISSION_RATE = 0.0035 ether;
+    uint256 public constant INITIAL_EMISSION_RATE = 0.0035 ether;
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -1156,13 +1152,12 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         TomatoCoin _tomato,
         address _devAddress,
         address _feeAddress,
-        // uint256 _tomatoPerSecond,
         uint256 _startTime
     ) public {
         tomato = _tomato;
         devAddress = _devAddress;
         feeAddress = _feeAddress;
-        tomatoPerSecond = EMISSION_RATE;
+        tomatoPerSecond = INITIAL_EMISSION_RATE;
         startTime = _startTime;
     }
 
@@ -1183,10 +1178,9 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     // Add a new lp to the pool. Can only be called by the owner.
     function addPool(uint256 _allocPoint, IBEP20 _lpToken, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) public onlyOwner nonDuplicated(_lpToken) {
         require(_depositFeeBP <= MAX_POOL_FEE, "add: invalid deposit fee basis points");
-        // require(_minHarvestInterval <= _maxHarvestInterval, "add: invalid harvest interval");
-        // require(_minHarvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
-        // require(_maxHarvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
         require(_harvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
+
+        _lpToken.balanceOf(address(this));
 
         if (_withUpdate) {
             massUpdatePools();
@@ -1201,14 +1195,12 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         accTomatoPerShare : 0,
         depositFeeBP : _depositFeeBP,
         harvestInterval : _harvestInterval
-        // minHarvestInterval : _minHarvestInterval,
-        // maxHarvestInterval : _maxHarvestInterval
         }));
     }
 
 
      // Update startTime by the owner (added this to ensure that dev can delay startTime due to the congestion network). Only used if required. 
-    function setStartTime(uint256 _newStartTime) public onlyOwner {
+    function setStartTime(uint256 _newStartTime) external onlyOwner {
         require(startTime > block.timestamp, 'setStartTime: farm already started');
         require(_newStartTime > block.timestamp, 'setStartTime: new start time must be future time');
 
@@ -1220,17 +1212,15 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         for (uint256 pid = 0; pid < length; pid++) {
             PoolInfo storage pool = poolInfo[pid];
             pool.lastRewardTime = startTime;
-            emit StartTimeChanged(_previousStartTime, _newStartTime);
         }
+
+        emit StartTimeChanged(_previousStartTime, _newStartTime);
     }
 
     // Update the given pool's TMT allocation point and deposit fee. Can only be called by the owner.
-    function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) public onlyOwner {
+    function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) external onlyOwner {
         require(_depositFeeBP <= MAX_POOL_FEE, "set: invalid deposit fee basis points");
-        // require(_minHarvestInterval <= _maxHarvestInterval, "add: invalid harvest interval");
-        // require(_minHarvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
-        // require(_maxHarvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
-        require(_harvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
+        require(_harvestInterval <= MAXIMUM_HARVEST_INTERVAL, "set: invalid harvest interval");
 
         if (_withUpdate) {
             massUpdatePools();
@@ -1239,14 +1229,11 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         poolInfo[_pid].allocPoint = _allocPoint;
         poolInfo[_pid].depositFeeBP = _depositFeeBP;
         poolInfo[_pid].harvestInterval = _harvestInterval;
-        // poolInfo[_pid].minHarvestInterval = _minHarvestInterval;
-        // poolInfo[_pid].maxHarvestInterval = _maxHarvestInterval;
     }
 
     // Return reward multiplier over the given _from to _to timestamp.
-    function getMultiplier(uint256 _from, uint256 _to) public view returns (uint256) {
-        if (tomato.totalSupply() + totalLockedUpRewards >= MAX_SUPPLY) return 0;
-        return _to.sub(_from).mul(BONUS_MULTIPLIER);
+    function getMultiplier(uint256 _from, uint256 _to) public pure returns (uint256) {
+        return _to.sub(_from);
     }
 
     // View function to see pending TMTs on frontend.
@@ -1255,7 +1242,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accTomatoPerShare = pool.accTomatoPerShare;
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (block.timestamp > pool.lastRewardTime && lpSupply != 0) {
+        if (block.timestamp > pool.lastRewardTime && lpSupply != 0 && totalAllocPoint > 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
             uint256 tomatoReward = multiplier.mul(tomatoPerSecond).mul(pool.allocPoint).div(totalAllocPoint);
             accTomatoPerShare = accTomatoPerShare.add(tomatoReward.mul(1e18).div(lpSupply));
@@ -1272,7 +1259,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         return block.timestamp >= user.nextHarvestUntil;
     }
     // View function to see if user harvest until time.
-    function getHarvestUntil(uint256 _pid, address _user) public view returns (uint256) {
+    function getHarvestUntil(uint256 _pid, address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_pid][_user];
         return user.nextHarvestUntil;
     }
@@ -1298,27 +1285,33 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         }
         uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
         uint256 tomatoReward = multiplier.mul(tomatoPerSecond).mul(pool.allocPoint).div(totalAllocPoint);
-        tomato.mint(devAddress, tomatoReward.div(10));
-        tomato.mint(address(this), tomatoReward);
-        pool.accTomatoPerShare = pool.accTomatoPerShare.add(tomatoReward.mul(1e18).div(lpSupply));
+
+        if (tomato.totalSupply() >= MAX_SUPPLY) {
+            tomatoReward = 0;
+        } else if (tomato.totalSupply().add(tomatoReward.mul(11).div(10)) >= MAX_SUPPLY) {
+            tomatoReward = (MAX_SUPPLY.sub(tomato.totalSupply()).mul(10).div(11));
+        }
+
+        if (tomatoReward > 0) {
+            tomato.mint(devAddress, tomatoReward.div(10));
+            tomato.mint(address(this), tomatoReward);
+            pool.accTomatoPerShare = pool.accTomatoPerShare.add(tomatoReward.mul(1e18).div(lpSupply)); 
+        }
+
         pool.lastRewardTime = block.timestamp;
     }
 
     // Deposit LP tokens to MasterChef for TMT allocation.
-    function deposit(uint256 _pid, uint256 _amount) public nonReentrant {
+    function deposit(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-
-        /* if (pool.minHarvestInterval != pool.maxHarvestInterval){
-            require(msg.sender == tx.origin && !isContract(address(msg.sender)), "no indirect calls");
-        } */
 
         updatePool(_pid);
         payOrLockupPendingTomato(_pid);
 
         if (_amount > 0) {
             uint256 _balanceBefore = pool.lpToken.balanceOf(address(this));
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+            pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
             // for token that have transfer tax
             _amount = pool.lpToken.balanceOf(address(this)).sub(_balanceBefore);
             if (pool.depositFeeBP > 0) {
@@ -1334,7 +1327,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     }
 
     // Withdraw LP tokens from MasterChef.
-    function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
+    function withdraw(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
@@ -1343,37 +1336,16 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
 
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
+            pool.lpToken.safeTransfer(msg.sender, _amount);
         }
         user.rewardDebt = user.amount.mul(pool.accTomatoPerShare).div(1e18);
         emit Withdraw(msg.sender, _pid, _amount);
     }
 
-    function rand(uint256 userSeed) internal view returns (uint256) {
-        uint256 seed = uint256(keccak256(abi.encodePacked(
-                block.timestamp + block.difficulty +
-                ((uint256(keccak256(abi.encodePacked(block.coinbase)))) / (now)) +
-                block.gaslimit +
-                ((uint256(keccak256(abi.encodePacked(msg.sender)))) / (now)) +
-                block.number,
-                blockhash(block.number - 1),
-                blockhash(block.number + 1),
-                block.timestamp,
-                block.difficulty,
-                block.timestamp,
-                userSeed
-            )));
-
-        return seed;
-    }
-
     function getPoolHarvestInterval(uint256 _pid) internal view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
-        /* if (pool.minHarvestInterval != pool.maxHarvestInterval){
-            return block.timestamp.add(pool.minHarvestInterval).add(rand(uint256(keccak256(abi.encodePacked(totalLockedUpRewards, pool.lastRewardTime)))) % pool.maxHarvestInterval.sub(pool.minHarvestInterval)).add(1);
-        } else { */
+
         return block.timestamp.add(pool.harvestInterval);
-        // }
     }
 
     function isContract(address account) internal view returns (bool) {
@@ -1416,10 +1388,10 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     }
 
     // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw(uint256 _pid) public nonReentrant {
+    function emergencyWithdraw(uint256 _pid) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-        pool.lpToken.safeTransfer(address(msg.sender), user.amount);
+        pool.lpToken.safeTransfer(msg.sender, user.amount);
         emit EmergencyWithdraw(msg.sender, _pid, user.amount);
         user.amount = 0;
         user.rewardDebt = 0;
@@ -1440,20 +1412,22 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     }
 
     // Update dev address by the previous dev.
-    function dev(address _devAddress) public {
-        require(msg.sender == devAddress, "dev: wut?");
+    function setDevAddress(address _devAddress) external {
+        require(_devAddress != address(0), "setDevAddress: setting devAddress to the zero address is forbidden");
+        require(msg.sender == devAddress, "setDevAddress: caller is not devAddress");
         devAddress = _devAddress;
         emit SetDevAddress(msg.sender, _devAddress);
     }
 
-    function setFeeAddress(address _feeAddress) public {
-        require(msg.sender == feeAddress, "setFeeAddress: FORBIDDEN");
+    function setFeeAddress(address _feeAddress) external {
+        require(_feeAddress != address(0), "setFeeAddress: setting feeAddress to the zero address is forbidden");
+        require(msg.sender == feeAddress, "setFeeAddress: caller is not feeAddress");
         feeAddress = _feeAddress;
         emit SetFeeAddress(msg.sender, _feeAddress);
     }
 
     //Pancake has to add hidden dummy pools inorder to alter the emission, here we make it simple and transparent to all.
-    function updateEmissionRate(uint256 _tomatoPerSecond) public onlyOwner {
+    function updateEmissionRate(uint256 _tomatoPerSecond) external onlyOwner {
         require (_tomatoPerSecond <= MAX_EMISSION_RATE, "updateEmissionRate: value higher than maximum");
         massUpdatePools();
         tomatoPerSecond = _tomatoPerSecond;
