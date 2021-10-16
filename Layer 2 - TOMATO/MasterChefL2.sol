@@ -1064,24 +1064,6 @@ contract TomatoCoin is BEP20('FarmersOnly\'s Tomato Coin', 'TMT') {
 
 
 
-// 
-interface IReferral {
-    /**
-     * @dev Record referral.
-     */
-    function recordReferral(address user, address referrer) external;
-
-    /**
-     * @dev Record referral commission.
-     */
-    function recordReferralCommission(address referrer, uint256 commission) external;
-    
-    /**
-     * @dev Get the referrer address that referred the user.
-     */
-    function getReferrer(address user) external view returns (address);
-}
-
 // MasterChef is the master of Tomato. He can make Tomato and he is a fair guy.
 //
 // Note that it's ownable and the owner wields tremendous power. The ownership
@@ -1155,21 +1137,11 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     uint256 public totalAllocPoint = 0;
     // The timestamp when TMT mining starts.
     uint256 public startTime;
-
-    IReferral public referral;
-    // Referral commission rate in basis points.
-    uint16 public referralCommissionRate = 0;
-    // Max referral commission rate: 0%.
-    uint16 public constant MAXIMUM_REFERRAL_COMMISSION_RATE = 0; // XXX REFERRAL DISABLED, ENABLING IN L3
     
     // Maximum tomatoPerSecond
     uint256 public MAX_EMISSION_RATE = 0.007 ether;
     // Initial tomatoPerSecond
     uint256 public EMISSION_RATE = 0.0035 ether;
-
- 
-    event SetReferralAddress(address indexed user, IReferral indexed newAddress);
-    event ReferralCommissionPaid(address indexed user, address indexed referrer, uint256 commissionAmount);
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -1333,7 +1305,7 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
     }
 
     // Deposit LP tokens to MasterChef for TMT allocation.
-    function deposit(uint256 _pid, uint256 _amount, address _referrer) public nonReentrant {
+    function deposit(uint256 _pid, uint256 _amount) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
 
@@ -1343,10 +1315,6 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
 
         updatePool(_pid);
         payOrLockupPendingTomato(_pid);
-
-        if (_amount > 0 && address(referral) != address(0) && _referrer != address(0) && _referrer != msg.sender) {
-            referral.recordReferral(msg.sender, _referrer);
-        }
 
         if (_amount > 0) {
             uint256 _balanceBefore = pool.lpToken.balanceOf(address(this));
@@ -1430,14 +1398,15 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         uint256 pending = user.amount.mul(pool.accTomatoPerShare).div(1e18).sub(user.rewardDebt);
         if (canHarvest(_pid, msg.sender)) {
             if (pending > 0 || user.rewardLockedUp > 0) {
-                uint256 totalRewards = pending.add(user.rewardLockedUp.div(2)); // XXX "div(2)" added for the HybridLockup feature
+                uint256 totalRewards = pending.add(user.rewardLockedUp);
+                uint256 rewardsToLockup = totalRewards.div(2);
+                uint256 rewardsToDistribute = totalRewards.sub(rewardsToLockup);
                 // reset lockup
-                totalLockedUpRewards = totalLockedUpRewards.sub(user.rewardLockedUp.div(2)); // XXX "div(2)" added for the HybridLockup feature
-                user.rewardLockedUp = user.rewardLockedUp.div(2); // XXX "div(2)" added for the HybridLockup feature
+                totalLockedUpRewards = totalLockedUpRewards.sub(user.rewardLockedUp).add(rewardsToLockup);
+                user.rewardLockedUp = rewardsToLockup;
                 user.nextHarvestUntil = getPoolHarvestInterval(_pid);
                 // send rewards
-                safeTomatoTransfer(msg.sender, totalRewards);
-                payReferralCommission(msg.sender, totalRewards);
+                safeTomatoTransfer(msg.sender, rewardsToDistribute);
             }
         } else if (pending > 0) {
             user.rewardLockedUp = user.rewardLockedUp.add(pending);
@@ -1491,26 +1460,4 @@ contract FarmersOnlyMasterChefL2 is Ownable, ReentrancyGuard {
         emit UpdateEmissionRate(msg.sender, _tomatoPerSecond);
     }
     
-    // Update the referral contract address by the owner
-    function setReferralAddress(IReferral _referral) external onlyOwner {
-        referral = _referral;
-        emit SetReferralAddress(msg.sender, _referral);
-    }
-    // Update referral commission rate by the owner
-    function setReferralCommissionRate(uint16 _referralCommissionRate) external onlyOwner {
-        require(_referralCommissionRate <= MAXIMUM_REFERRAL_COMMISSION_RATE, "setReferralCommissionRate: invalid referral commission rate basis points");
-        referralCommissionRate = _referralCommissionRate;
-    }
-    // Pay referral commission to the referrer who referred this user.
-    function payReferralCommission(address _user, uint256 _pending) internal {
-        if (address(referral) != address(0) && referralCommissionRate > 0) {
-            address referrer = referral.getReferrer(_user);
-            uint256 commissionAmount = _pending.mul(referralCommissionRate).div(10000);
-            if (referrer != address(0) && commissionAmount > 0) {
-                tomato.mint(referrer, commissionAmount); 
-                referral.recordReferralCommission(referrer, commissionAmount);
-                emit ReferralCommissionPaid(_user, referrer, commissionAmount);
-            }
-        }
-    }
 }
