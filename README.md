@@ -1,4 +1,4 @@
-# FarmersOnly Contracts 🌽
+# FarmersOnly Contracts 🌽🍅
 
 https://farmersonly.farm. Feel free to read the code. More details coming soon.
 
