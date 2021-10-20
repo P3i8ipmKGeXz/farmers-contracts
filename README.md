@@ -4,7 +4,7 @@ https://farmersonly.farm. Feel free to read the code. More details coming soon.
 
 ## Deployed Contracts / Hash
 
-### LAYER 1 - AVAX
+#### LAYER 1 - AVAX
 
 - CornCoin - https://cchain.explorer.avax.network/address/0xFcA54c64BC44ce2E72d621B6Ed34981e53B66CaE/contracts
 - MasterChef - https://cchain.explorer.avax.network/address/0x27271ECd985F1B666e51209B033d93ddC5a36076/contracts
